@@ -3,6 +3,9 @@ const cors = require('cors');
 const mongoose = require('mongoose');
 require('dotenv').config();
 const { GoogleGenerativeAI } = require('@google/generative-ai');
+const { Expo } = require('expo-server-sdk');
+
+const expo = new Expo();
 
 const app = express();
 app.use(cors());
@@ -36,6 +39,7 @@ const reminderSchema = new mongoose.Schema({
   priority: { type: String, default: 'medium' },
   completed: { type: Boolean, default: false },
   completedAt: { type: Date },
+  notificationSent: { type: Boolean, default: false },
   
   // New engine fields
   description: { type: String },
@@ -55,6 +59,81 @@ const messageSchema = new mongoose.Schema({
   text: { type: String, required: true },
 }, { timestamps: true });
 const Message = mongoose.model('Message', messageSchema);
+
+const pushTokenSchema = new mongoose.Schema({
+  token: { type: String, required: true, unique: true }
+});
+const PushToken = mongoose.model('PushToken', pushTokenSchema);
+
+// Push Notification Cron Loop
+setInterval(async () => {
+  try {
+    const now = new Date();
+    const reminders = await Reminder.find({ completed: false, notificationSent: { $ne: true } });
+    
+    if (reminders.length === 0) return;
+
+    const tokensDoc = await PushToken.find();
+    const pushTokens = tokensDoc.map(t => t.token).filter(t => Expo.isExpoPushToken(t));
+    if (pushTokens.length === 0) return;
+
+    const messages = [];
+    for (const reminder of reminders) {
+      if (!reminder.date || !reminder.time) continue;
+      
+      let targetDateStr = reminder.date;
+      if (targetDateStr === 'today') {
+        const d = new Date();
+        // Shift to IST for 'today'
+        const istOffset = 5.5 * 60 * 60 * 1000;
+        const istTime = new Date(d.getTime() + istOffset);
+        targetDateStr = istTime.toISOString().split('T')[0];
+      } else if (targetDateStr === 'tomorrow') {
+        const d = new Date();
+        const istOffset = 5.5 * 60 * 60 * 1000;
+        const istTime = new Date(d.getTime() + istOffset);
+        istTime.setDate(istTime.getDate() + 1);
+        targetDateStr = istTime.toISOString().split('T')[0];
+      }
+
+      let dateObj;
+      if (reminder.datetime) {
+        dateObj = new Date(reminder.datetime);
+      } else {
+        // Fallback assuming targetDateStr + time is in IST
+        dateObj = new Date(`${targetDateStr}T${reminder.time}:00+05:30`);
+      }
+      
+      if (dateObj <= now) {
+        for (let pushToken of pushTokens) {
+          messages.push({
+            to: pushToken,
+            sound: 'default',
+            title: 'Smart Reminder 🔔',
+            body: reminder.task,
+            data: { id: reminder._id },
+          });
+        }
+        reminder.notificationSent = true;
+        await reminder.save();
+      }
+    }
+
+    if (messages.length > 0) {
+      let chunks = expo.chunkPushNotifications(messages);
+      for (let chunk of chunks) {
+        try {
+          await expo.sendPushNotificationsAsync(chunk);
+          console.log('Push notifications sent successfully!');
+        } catch (error) {
+          console.error('Error sending push chunk:', error);
+        }
+      }
+    }
+  } catch (err) {
+    console.error('Cron error:', err);
+  }
+}, 30000); // Check every 30 seconds
 
 let genAI;
 let model;
@@ -109,6 +188,17 @@ app.get('/api/messages', async (req, res) => {
     res.json(messages);
   } catch (err) {
     res.status(500).json({ error: 'Failed to fetch messages' });
+  }
+});
+
+app.post('/api/push-token', async (req, res) => {
+  const { token } = req.body;
+  if (!token) return res.status(400).json({ error: 'Token is required' });
+  try {
+    await PushToken.findOneAndUpdate({ token }, { token }, { upsert: true, new: true });
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to save token' });
   }
 });
 
@@ -213,6 +303,16 @@ OUTPUT SCHEMA:
 
   if (!parsedData) {
     parsedData = { title: text, priority: 'medium', category: 'other' };
+  }
+
+  // Force clarification if no datetime was detected for a new task
+  if (parsedData.intent !== 'clarify' && parsedData.intent !== 'cancel') {
+    if (!parsedData.datetime) {
+      return res.json({
+        intent: 'clarify',
+        clarification_message: `I caught the task "**${parsedData.title || text}**", but I didn't catch a specific time. What time would you like to be reminded?`
+      });
+    }
   }
 
   let timeStr = '';
