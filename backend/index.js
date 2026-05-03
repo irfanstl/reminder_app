@@ -218,18 +218,13 @@ OUTPUT SCHEMA:
   let timeStr = '';
   let dateStr = 'today';
   if (parsedData.datetime) {
-    const dt = new Date(parsedData.datetime);
-    if (!isNaN(dt)) {
-      // Force the Date object to represent the exact local time in IST
-      const istDate = new Date(dt.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
-      
-      const hours = istDate.getHours().toString().padStart(2, '0');
-      const mins = istDate.getMinutes().toString().padStart(2, '0');
-      timeStr = `${hours}:${mins}`;
-      const year = istDate.getFullYear();
-      const month = (istDate.getMonth() + 1).toString().padStart(2, '0');
-      const day = istDate.getDate().toString().padStart(2, '0');
-      dateStr = `${year}-${month}-${day}`;
+    try {
+      // The AI provides the ISO string in IST directly (e.g. '2026-05-03T15:30:00+05:30')
+      // Extracting it as a raw string avoids all server-side UTC timezone shifting bugs!
+      timeStr = parsedData.datetime.substring(11, 16);
+      dateStr = parsedData.datetime.substring(0, 10);
+    } catch (e) {
+      console.error('String parse failed, fallback used');
     }
   }
 
