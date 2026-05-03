@@ -11,6 +11,18 @@ app.use(express.json());
 const PORT = process.env.PORT || 5000;
 const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017/smart-reminder';
 
+// Keep-Alive System for Render Free Tier
+const https = require('https');
+setInterval(() => {
+  https.get('https://reminder-app-mzg1.onrender.com/api/ping', (res) => {
+    console.log('Self-ping successful: Staying awake!');
+  }).on('error', (err) => {
+    console.log('Self-ping error: ' + err.message);
+  });
+}, 840000); // Ping every 14 minutes (Render sleeps after 15)
+
+app.get('/api/ping', (req, res) => res.send('pong'));
+
 console.log("URI IS:", MONGO_URI);
 mongoose.connect(MONGO_URI)
   .then(() => console.log('Connected to MongoDB Database!'))
