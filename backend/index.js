@@ -319,12 +319,19 @@ OUTPUT SCHEMA:
   let dateStr = 'today';
   if (parsedData.datetime) {
     try {
-      // The AI provides the ISO string in IST directly (e.g. '2026-05-03T15:30:00+05:30')
-      // Extracting it as a raw string avoids all server-side UTC timezone shifting bugs!
-      timeStr = parsedData.datetime.substring(11, 16);
-      dateStr = parsedData.datetime.substring(0, 10);
+      const d = new Date(parsedData.datetime);
+      if (!isNaN(d.getTime())) {
+        // Shift absolute time to IST (+5:30)
+        const istOffset = 5.5 * 60 * 60 * 1000;
+        const istTime = new Date(d.getTime() + istOffset);
+        
+        // Output as UTC string so the hours/minutes exactly match the IST shifted values
+        const isoString = istTime.toISOString();
+        timeStr = isoString.substring(11, 16);
+        dateStr = isoString.substring(0, 10);
+      }
     } catch (e) {
-      console.error('String parse failed, fallback used');
+      console.error('Date parse failed', e);
     }
   }
 
