@@ -220,12 +220,15 @@ OUTPUT SCHEMA:
   if (parsedData.datetime) {
     const dt = new Date(parsedData.datetime);
     if (!isNaN(dt)) {
-      const hours = dt.getHours().toString().padStart(2, '0');
-      const mins = dt.getMinutes().toString().padStart(2, '0');
+      // Force the Date object to represent the exact local time in IST
+      const istDate = new Date(dt.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
+      
+      const hours = istDate.getHours().toString().padStart(2, '0');
+      const mins = istDate.getMinutes().toString().padStart(2, '0');
       timeStr = `${hours}:${mins}`;
-      const year = dt.getFullYear();
-      const month = (dt.getMonth() + 1).toString().padStart(2, '0');
-      const day = dt.getDate().toString().padStart(2, '0');
+      const year = istDate.getFullYear();
+      const month = (istDate.getMonth() + 1).toString().padStart(2, '0');
+      const day = istDate.getDate().toString().padStart(2, '0');
       dateStr = `${year}-${month}-${day}`;
     }
   }
